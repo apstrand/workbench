@@ -252,6 +252,14 @@ export default function FileBrowser({
 
   // Central keyboard navigation for the entire sidebar
   const handleSidebarKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      if (canGoUp() && !loading) {
+        handleGoUp();
+      }
+      return;
+    }
+
     if (activeSection === "workspace") {
       if (pinnedWorkspaces.length === 0) return;
 
