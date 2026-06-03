@@ -233,7 +233,7 @@ export default function FileBrowser({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setFocusedEntryIndex((prev) => (prev > 0 ? prev - 1 : 0));
-    } else if (e.key === "Enter") {
+    } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
       if (index >= 0 && index < entries.length) {
@@ -262,7 +262,7 @@ export default function FileBrowser({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setFocusedWorkspaceIndex((prev) => (prev > 0 ? prev - 1 : 0));
-    } else if (e.key === "Enter") {
+    } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       const index = focusedWorkspaceIndex >= 0 ? focusedWorkspaceIndex : 0;
       if (index >= 0 && index < pinnedWorkspaces.length) {
