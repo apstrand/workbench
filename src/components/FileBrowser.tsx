@@ -238,7 +238,7 @@ export default function FileBrowser({
       const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
       if (index >= 0 && index < entries.length) {
         const entry = entries[index];
-        const isMarkdown = entry.name.toLowerCase().endsWith(".md");
+        const isMarkdown = entry.name.toLowerCase().endsWith(".md") || entry.name.toLowerCase().endsWith(".qmd");
         const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
         const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
         const isSelectable = isMarkdown || isImage || isVideo;
@@ -320,7 +320,10 @@ export default function FileBrowser({
                   <div
                     key={path}
                     className={`workspace-item ${isFocused ? "keyboard-focused" : ""}`}
-                    onClick={() => setCurrentPath(path)}
+                    onClick={() => {
+                      setFocusedWorkspaceIndex(index);
+                      setCurrentPath(path);
+                    }}
                     title={path}
                   >
                     <div className="workspace-item-info">
@@ -426,7 +429,7 @@ export default function FileBrowser({
                 </div>
               ) : (
                 entries.map((entry, index) => {
-                  const isMarkdown = entry.name.toLowerCase().endsWith(".md");
+                  const isMarkdown = entry.name.toLowerCase().endsWith(".md") || entry.name.toLowerCase().endsWith(".qmd");
                   const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
                   const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
                   const isSelectable = isMarkdown || isImage || isVideo;
@@ -440,6 +443,7 @@ export default function FileBrowser({
                       key={entry.path}
                       className={`file-item ${isSelected ? "selected" : ""} ${isFocused ? "keyboard-focused" : ""}`}
                       onClick={() => {
+                        setFocusedEntryIndex(index);
                         if (entry.is_dir) {
                           setCurrentPath(entry.path);
                         } else if (isSelectable) {
