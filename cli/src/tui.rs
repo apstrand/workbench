@@ -323,10 +323,10 @@ impl AppState {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
             }
-            KeyCode::PageDown => {
+            KeyCode::PageDown | KeyCode::Char(' ') => {
                 self.scroll_offset = self.scroll_offset.saturating_add(15);
             }
-            KeyCode::PageUp => {
+            KeyCode::PageUp | KeyCode::Backspace => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(15);
             }
             KeyCode::Char('e') => {
