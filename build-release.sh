@@ -3,9 +3,20 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
+# Parse command line options
+SKIP_DMG=false
+for arg in "$@"; do
+  if [ "$arg" = "--no-dmg" ] || [ "$arg" = "-n" ]; then
+    SKIP_DMG=true
+  fi
+done
+
 # Clear visual spacer
 echo "============================================="
 echo "        Tauri Release Build Script           "
+if [ "$SKIP_DMG" = true ]; then
+  echo "        (DMG bundling is disabled)           "
+fi
 echo "============================================="
 
 # Detect the Operating System
@@ -38,7 +49,35 @@ if [ "$OS" = "Darwin" ]; then
   
   # Run the universal build
   echo "Building macOS universal binary..."
-  npm run tauri build -- --target universal-apple-darwin
+  set +e
+  if [ "$SKIP_DMG" = true ]; then
+    npm run tauri build -- --target universal-apple-darwin --bundles app
+  else
+    npm run tauri build -- --target universal-apple-darwin
+  fi
+  BUILD_EXIT_CODE=$?
+  set -e
+
+  if [ $BUILD_EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "ERROR: Tauri build failed (Exit Code: $BUILD_EXIT_CODE)."
+    if [ "$SKIP_DMG" = false ]; then
+      echo "------------------------------------------------------------"
+      echo "TIPS FOR macOS DMG BUNDLING FAILURES:"
+      echo "This error (e.g. running bundle_dmg.sh) is common on macOS."
+      echo "It typically occurs because AppleScript/Finder Automation"
+      echo "permissions are not granted to the terminal or compile task."
+      echo ""
+      echo "You can bypass DMG generation and compile only the '.app' bundle by running:"
+      echo "  ./build-release.sh --no-dmg"
+      echo ""
+      echo "To grant Finder control permissions (if you need a DMG):"
+      echo "  Go to: System Settings > Privacy & Security > Automation"
+      echo "  Enable permissions for your terminal application."
+      echo "------------------------------------------------------------"
+    fi
+    exit $BUILD_EXIT_CODE
+  fi
 
   # Find and copy macOS bundles
   echo "Organizing build assets into $RELEASES_DIR..."
@@ -47,8 +86,8 @@ if [ "$OS" = "Darwin" ]; then
   UNIVERSAL_BUNDLE_DIR="src-tauri/target/universal-apple-darwin/release/bundle"
   
   if [ -d "$UNIVERSAL_BUNDLE_DIR" ]; then
-    # Copy .dmg files
-    find "$UNIVERSAL_BUNDLE_DIR" -type f -name "*.dmg" -exec cp {} "$RELEASES_DIR/" \;
+    # Copy .dmg files (if they exist)
+    find "$UNIVERSAL_BUNDLE_DIR" -type f -name "*.dmg" -exec cp {} "$RELEASES_DIR/" \; 2>/dev/null || true
     
     # Copy .app folders (using recursive copy since .app is a folder)
     find "$UNIVERSAL_BUNDLE_DIR" -type d -name "*.app" -prune -exec cp -R {} "$RELEASES_DIR/" \;
@@ -56,7 +95,7 @@ if [ "$OS" = "Darwin" ]; then
     # Fallback to standard release build target if universal target didn't compile there
     STANDARD_BUNDLE_DIR="src-tauri/target/release/bundle"
     if [ -d "$STANDARD_BUNDLE_DIR" ]; then
-      find "$STANDARD_BUNDLE_DIR" -type f -name "*.dmg" -exec cp {} "$RELEASES_DIR/" \;
+      find "$STANDARD_BUNDLE_DIR" -type f -name "*.dmg" -exec cp {} "$RELEASES_DIR/" \; 2>/dev/null || true
       find "$STANDARD_BUNDLE_DIR" -type d -name "*.app" -prune -exec cp -R {} "$RELEASES_DIR/" \;
     fi
   fi
