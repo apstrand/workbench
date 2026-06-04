@@ -65,7 +65,7 @@ elif [ "$OS" = "Linux" ]; then
   echo "Checking Linux system dependencies..."
   
   # Define list of Debian/Ubuntu dependencies
-  DEPS=("libwebkit2gtk-4.1-dev" "build-essential" "curl" "wget" "file" "libxdo-dev" "libssl-dev" "libayatana-appindicator3-dev" "librsvg2-dev")
+  DEPS=("libwebkit2gtk-4.1-dev" "build-essential" "curl" "wget" "file" "libxdo-dev" "libssl-dev" "libayatana-appindicator3-dev" "librsvg2-dev" "libdbus-1-dev" "pkg-config")
   MISSING_DEPS=()
   
   if command -v dpkg -s &> /dev/null; then
