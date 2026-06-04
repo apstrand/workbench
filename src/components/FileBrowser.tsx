@@ -10,6 +10,7 @@ import {
   X,
   Image as ImageIcon,
   Video as VideoIcon,
+  Terminal as TerminalIcon,
 } from "lucide-react";
 
 interface FileEntry {
@@ -250,6 +251,14 @@ export default function FileBrowser({
     setPinnedWorkspaces(pinnedWorkspaces.filter((p) => p !== path));
   };
 
+  // Open terminal at path
+  const handleOpenTerminal = () => {
+    if (!currentPath) return;
+    invoke("open_terminal", { path: currentPath })
+      .catch((err) => alert(`Error opening terminal: ${err}`));
+    sidebarRef.current?.focus();
+  };
+
   // Central keyboard navigation for the entire sidebar
   const handleSidebarKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Backspace") {
@@ -300,10 +309,7 @@ export default function FileBrowser({
         const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
         if (index >= 0 && index < entries.length) {
           const entry = entries[index];
-          const isMarkdown = entry.name.toLowerCase().endsWith(".md") || entry.name.toLowerCase().endsWith(".qmd");
-          const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
-          const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
-          const isSelectable = isMarkdown || isImage || isVideo;
+          const isSelectable = !entry.is_dir;
           
           if (entry.is_dir) {
             setCurrentPath(entry.path);
@@ -417,28 +423,40 @@ export default function FileBrowser({
             <span>Folders</span>
           </span>
           {currentPath && (
-            <button
-              className="file-action-btn"
-              tabIndex={-1}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                if (pinnedWorkspaces.includes(currentPath)) {
-                  handleUnpin(currentPath);
-                } else {
-                  handlePin(currentPath);
-                }
-                sidebarRef.current?.focus();
-              }}
-              title={pinnedWorkspaces.includes(currentPath) ? "Unpin current folder" : "Pin current folder"}
-              style={{ opacity: 0.8 }}
-            >
-              <Pin
-                className={`w-3.5 h-3.5 ${pinnedWorkspaces.includes(currentPath) ? "pinned text-accent fill-accent" : ""}`}
-                style={{
-                  transform: pinnedWorkspaces.includes(currentPath) ? "none" : "rotate(45deg)",
+            <div style={{ display: "flex", gap: "6px" }}>
+              <button
+                className="file-action-btn"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleOpenTerminal}
+                title="Open terminal in this folder"
+                style={{ opacity: 0.8 }}
+              >
+                <TerminalIcon className="w-3.5 h-3.5" />
+              </button>
+              <button
+                className="file-action-btn"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (pinnedWorkspaces.includes(currentPath)) {
+                    handleUnpin(currentPath);
+                  } else {
+                    handlePin(currentPath);
+                  }
+                  sidebarRef.current?.focus();
                 }}
-              />
-            </button>
+                title={pinnedWorkspaces.includes(currentPath) ? "Unpin current folder" : "Pin current folder"}
+                style={{ opacity: 0.8 }}
+              >
+                <Pin
+                  className={`w-3.5 h-3.5 ${pinnedWorkspaces.includes(currentPath) ? "pinned text-accent fill-accent" : ""}`}
+                  style={{
+                    transform: pinnedWorkspaces.includes(currentPath) ? "none" : "rotate(45deg)",
+                  }}
+                />
+              </button>
+            </div>
           )}
         </div>
         <div className="sidebar-scroll-content">
@@ -482,10 +500,9 @@ export default function FileBrowser({
                 </div>
               ) : (
                 entries.map((entry, index) => {
-                  const isMarkdown = entry.name.toLowerCase().endsWith(".md") || entry.name.toLowerCase().endsWith(".qmd");
                   const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
                   const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
-                  const isSelectable = isMarkdown || isImage || isVideo;
+                  const isSelectable = !entry.is_dir;
                   
                   const isSelected = selectedFile === entry.path;
                   const isPinned = pinnedWorkspaces.includes(entry.path);

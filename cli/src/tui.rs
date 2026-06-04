@@ -43,6 +43,8 @@ pub struct AppState {
     pub error: Option<String>,
     pub quit: bool,
     pub palette: Palette,
+    pub open_files: Vec<PathBuf>,
+    pub needs_clear: bool,
 }
 
 impl AppState {
@@ -72,6 +74,8 @@ impl AppState {
             error: None,
             quit: false,
             palette,
+            open_files: Vec::new(),
+            needs_clear: false,
         };
 
         app.reload_directory();
@@ -98,6 +102,22 @@ impl AppState {
     }
 
     pub fn select_file(&mut self, path: PathBuf) {
+        if !self.open_files.contains(&path) {
+            self.open_files.push(path.clone());
+        }
+
+        if let Some(parent) = path.parent() {
+            let canon_parent = fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+            if self.current_dir != canon_parent {
+                self.current_dir = canon_parent;
+                self.reload_directory();
+            }
+        }
+
+        if let Some(pos) = self.entries.iter().position(|e| PathBuf::from(&e.path) == path) {
+            self.folder_index = pos;
+        }
+
         let path_str = path.to_string_lossy();
         if is_media_file(&path_str) {
             self.selected_file = Some(path);
@@ -118,9 +138,89 @@ impl AppState {
                 self.error = None;
             }
             Err(e) => {
+                self.selected_file = Some(path);
+                self.file_content = None;
+                self.file_lines_count = 0;
+                self.scroll_offset = 0;
                 self.error = Some(format!("Error opening file: {}", e));
             }
         }
+    }
+
+    pub fn close_file(&mut self, path: PathBuf) {
+        let index = self.open_files.iter().position(|p| p == &path);
+        if let Some(idx) = index {
+            self.open_files.remove(idx);
+            
+            if self.selected_file.as_ref() == Some(&path) {
+                if !self.open_files.is_empty() {
+                    let next_idx = idx.min(self.open_files.len() - 1);
+                    let next_path = self.open_files[next_idx].clone();
+                    self.select_file(next_path);
+                } else {
+                    self.selected_file = None;
+                    self.file_content = None;
+                    self.file_lines_count = 0;
+                    self.scroll_offset = 0;
+                    self.error = None;
+                }
+            }
+        }
+    }
+
+    pub fn open_terminal_in_current_dir(&mut self) -> Result<()> {
+        let path = &self.current_dir;
+        if !path.exists() || !path.is_dir() {
+            self.error = Some("Current directory does not exist".to_string());
+            return Ok(());
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .args(&["-a", "Terminal", &path.to_string_lossy()])
+                .status()?;
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("cmd")
+                .args(&["/C", "start", "cmd.exe", "/K", &format!("cd /d {}", path.to_string_lossy())])
+                .status()?;
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            // On Linux, try standard terminal emulators
+            let terminals = [
+                ("gnome-terminal", &["--working-directory"]),
+                ("xfce4-terminal", &["--working-directory"]),
+                ("konsole", &["--workdir"]),
+                ("xterm", &["-working-directory"]),
+            ];
+            
+            let mut spawned = false;
+            for (term, args) in terminals.iter() {
+                let mut cmd = std::process::Command::new(term);
+                cmd.arg(args[0]).arg(path);
+                if cmd.spawn().is_ok() {
+                    spawned = true;
+                    break;
+                }
+            }
+            
+            if !spawned {
+                // Fallback for generic terminal emulator launcher
+                let fallback = std::process::Command::new("x-terminal-emulator")
+                    .args(&["-e", &format!("cd {} && exec sh", path.to_string_lossy())])
+                    .spawn();
+                if fallback.is_err() {
+                    self.error = Some("No supported terminal emulator found".to_string());
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn handle_key(&mut self, key: event::KeyEvent) -> Result<()> {
@@ -140,6 +240,48 @@ impl AppState {
 
     fn handle_global_keys(&mut self, key: event::KeyEvent) -> bool {
         match key.code {
+            KeyCode::Char('t') => {
+                let _ = self.open_terminal_in_current_dir();
+                true
+            }
+            KeyCode::Char('[') => {
+                if !self.open_files.is_empty() {
+                    if let Some(ref current) = self.selected_file {
+                        if let Some(idx) = self.open_files.iter().position(|p| p == current) {
+                            let prev_idx = if idx == 0 {
+                                self.open_files.len() - 1
+                            } else {
+                                idx - 1
+                            };
+                            let prev_path = self.open_files[prev_idx].clone();
+                            self.select_file(prev_path);
+                        }
+                    } else {
+                        let path = self.open_files[0].clone();
+                        self.select_file(path);
+                    }
+                }
+                true
+            }
+            KeyCode::Char(']') => {
+                if !self.open_files.is_empty() {
+                    if let Some(ref current) = self.selected_file {
+                        if let Some(idx) = self.open_files.iter().position(|p| p == current) {
+                            let next_idx = if idx == self.open_files.len() - 1 {
+                                0
+                            } else {
+                                idx + 1
+                            };
+                            let next_path = self.open_files[next_idx].clone();
+                            self.select_file(next_path);
+                        }
+                    } else {
+                        let path = self.open_files[0].clone();
+                        self.select_file(path);
+                    }
+                }
+                true
+            }
             KeyCode::Tab => {
                 self.active_section = match self.active_section {
                     ActiveSection::Workspaces => {
@@ -311,6 +453,26 @@ impl AppState {
                 }
                 let _ = self.config.save();
             }
+            KeyCode::Char('e') => {
+                if !self.entries.is_empty() {
+                    let entry = self.entries[self.folder_index].clone();
+                    if !entry.is_dir {
+                        let path = PathBuf::from(&entry.path);
+                        if !is_media_file(&entry.path) {
+                            self.select_file(path);
+                            return self.edit_current_file();
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('o') => {
+                if !self.entries.is_empty() {
+                    let entry = &self.entries[self.folder_index];
+                    if !entry.is_dir {
+                        let _ = open_system_default(&entry.path);
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -345,6 +507,12 @@ impl AppState {
             KeyCode::Char('o') | KeyCode::Enter => {
                 if let Some(ref file_path) = self.selected_file {
                     let _ = open_system_default(&file_path.to_string_lossy());
+                }
+            }
+            KeyCode::Char('w') | KeyCode::Char('c') => {
+                if let Some(ref file_path) = self.selected_file {
+                    let path = file_path.clone();
+                    self.close_file(path);
                 }
             }
             _ => {}
@@ -397,6 +565,7 @@ impl AppState {
         )?;
 
         self.select_file(file_path);
+        self.needs_clear = true;
         
         Ok(())
     }
@@ -535,6 +704,56 @@ impl AppState {
 
         f.render_widget(folders_list, sidebar_chunks[1]);
 
+        // Render Tabs and Content area
+        let content_area = if !self.open_files.is_empty() {
+            let right_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                ])
+                .split(pane_chunks[1]);
+            
+            // Draw tabs in right_chunks[0]
+            let mut tab_spans = Vec::new();
+            for (i, path) in self.open_files.iter().enumerate() {
+                let name = path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                
+                let is_active = self.selected_file.as_ref() == Some(path);
+                
+                if i > 0 {
+                    tab_spans.push(Span::styled(" │ ", Style::default().fg(border_inactive_color)));
+                }
+
+                if is_active {
+                    tab_spans.push(Span::styled(
+                        format!(" ◉ {} ", name),
+                        Style::default().bg(accent_soft_color).fg(text_primary_color).add_modifier(Modifier::BOLD)
+                    ));
+                } else {
+                    tab_spans.push(Span::styled(
+                        format!(" ○ {} ", name),
+                        Style::default().fg(text_secondary_color)
+                    ));
+                }
+            }
+
+            let tabs_block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(border_inactive_color))
+                .title(Span::styled("📂 Open Tabs ( [ / ] cycle, w/c close )", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)));
+            
+            let tabs_paragraph = Paragraph::new(Line::from(tab_spans))
+                .block(tabs_block);
+            f.render_widget(tabs_paragraph, right_chunks[0]);
+
+            right_chunks[1]
+        } else {
+            pane_chunks[1]
+        };
+
         // Render Content Viewer
         let viewer_border_color = if self.active_section == ActiveSection::Viewer {
             border_active_color
@@ -577,17 +796,17 @@ impl AppState {
                 ];
                 let paragraph = Paragraph::new(media_lines)
                     .block(viewer_block);
-                f.render_widget(paragraph, pane_chunks[1]);
+                f.render_widget(paragraph, content_area);
             } else if let Some(ref text) = self.file_content {
                 let paragraph = Paragraph::new(text.clone())
                     .block(viewer_block)
                     .scroll((self.scroll_offset as u16, 0))
                     .wrap(Wrap { trim: false });
-                f.render_widget(paragraph, pane_chunks[1]);
+                f.render_widget(paragraph, content_area);
             } else {
                 let paragraph = Paragraph::new(vec![Line::from("  No content loaded.")])
                     .block(viewer_block);
-                f.render_widget(paragraph, pane_chunks[1]);
+                f.render_widget(paragraph, content_area);
             }
         } else {
             let viewer_block = viewer_block.title("📄 Welcome");
@@ -612,6 +831,18 @@ impl AppState {
                 Line::from(vec![
                     Span::styled("    Tab / Shift-Tab : ", Style::default().fg(text_secondary_color)),
                     Span::styled("Cycle focus between panels", Style::default().fg(text_primary_color))
+                ]),
+                Line::from(vec![
+                    Span::styled("    [ / ]           : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Cycle active tabs", Style::default().fg(text_primary_color))
+                ]),
+                Line::from(vec![
+                    Span::styled("    w / c           : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Close active file/tab (Viewer)", Style::default().fg(text_primary_color))
+                ]),
+                Line::from(vec![
+                    Span::styled("    t               : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Open terminal in current directory", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
                     Span::styled("    j / k / Arrows  : ", Style::default().fg(text_secondary_color)),
@@ -645,7 +876,7 @@ impl AppState {
             ];
             let paragraph = Paragraph::new(landing_text)
                 .block(viewer_block);
-            f.render_widget(paragraph, pane_chunks[1]);
+            f.render_widget(paragraph, content_area);
         }
 
         // Render Help/Status Bar at bottom
@@ -659,7 +890,11 @@ impl AppState {
         } else {
             let help_spans = vec![
                 Span::styled(" Tab", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
-                Span::styled(" Cycle Focus |", Style::default().fg(help_fg)),
+                Span::styled(" Focus |", Style::default().fg(help_fg)),
+                Span::styled(" [ / ]", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" Cycle Tabs |", Style::default().fg(help_fg)),
+                Span::styled(" t", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" Terminal |", Style::default().fg(help_fg)),
                 Span::styled(" Enter", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Open/Enter |", Style::default().fg(help_fg)),
                 Span::styled(" Backspace/u", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),

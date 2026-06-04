@@ -101,6 +101,63 @@ fn write_file_content(path: String, content: String) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn open_terminal(path: String) -> Result<(), String> {
+    let path = PathBuf::from(&path);
+    if !path.exists() || !path.is_dir() {
+        return Err("Path does not exist or is not a directory".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(&["-a", "Terminal", &path.to_string_lossy()])
+            .status()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(&["/C", "start", "cmd.exe", "/K", &format!("cd /d {}", path.to_string_lossy())])
+            .status()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // On Linux, try standard terminal emulators
+        let terminals = [
+            ("gnome-terminal", &["--working-directory"]),
+            ("xfce4-terminal", &["--working-directory"]),
+            ("konsole", &["--workdir"]),
+            ("xterm", &["-working-directory"]),
+        ];
+        
+        let mut spawned = false;
+        for (term, args) in terminals.iter() {
+            let mut cmd = std::process::Command::new(term);
+            cmd.arg(args[0]).arg(&path);
+            if cmd.spawn().is_ok() {
+                spawned = true;
+                break;
+            }
+        }
+        
+        if !spawned {
+            // Fallback for generic terminal emulator launcher
+            let fallback = std::process::Command::new("x-terminal-emulator")
+                .args(&["-e", &format!("cd {} && exec sh", path.to_string_lossy())])
+                .spawn();
+            if fallback.is_err() {
+                return Err("No supported terminal emulator found".to_string());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -109,7 +166,8 @@ pub fn run() {
             get_home_dir,
             list_directory,
             read_file_content,
-            write_file_content
+            write_file_content,
+            open_terminal
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

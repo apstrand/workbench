@@ -20,6 +20,7 @@ import {
   CodeSquare,
   CheckCircle,
   FileEdit,
+  Lock,
 } from "lucide-react";
 
 interface MarkdownEditorProps {
@@ -36,6 +37,8 @@ export default function MarkdownEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  const isEditable = filePath.toLowerCase().endsWith(".md") || filePath.toLowerCase().endsWith(".qmd");
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -45,6 +48,8 @@ export default function MarkdownEditor({
       Markdown,
     ],
     content: initialContent,
+    editable: isEditable,
+    autofocus: isEditable ? 'end' : false,
     editorProps: {
       attributes: {
         class: "ProseMirror",
@@ -59,8 +64,12 @@ export default function MarkdownEditor({
       if (currentMarkdown !== initialContent) {
         editor.commands.setContent(initialContent);
       }
+      editor.setEditable(isEditable);
+      if (isEditable) {
+        editor.commands.focus('end');
+      }
     }
-  }, [filePath, initialContent, editor]);
+  }, [filePath, initialContent, editor, isEditable]);
 
   // Handle Save operation
   const handleSave = async () => {
@@ -119,24 +128,33 @@ export default function MarkdownEditor({
             </div>
           </div>
           <div className="save-status">
-            {saveSuccess && (
-              <span style={{ color: "hsl(142, 71%, 45%)", display: "flex", alignItems: "center", gap: "4px", fontSize: "13px" }}>
-                <CheckCircle className="w-4 h-4" /> Saved
+            {isEditable ? (
+              <>
+                {saveSuccess && (
+                  <span style={{ color: "hsl(142, 71%, 45%)", display: "flex", alignItems: "center", gap: "4px", fontSize: "13px" }}>
+                    <CheckCircle className="w-4 h-4" /> Saved
+                  </span>
+                )}
+                <button
+                  className="save-button"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                >
+                  <Save className="w-4 h-4" />
+                  {isSaving ? "Saving..." : "Save"}
+                </button>
+              </>
+            ) : (
+              <span style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "4px 8px", backgroundColor: "var(--bg-tertiary)", borderRadius: "4px", color: "var(--text-secondary)" }}>
+                <Lock className="w-3.5 h-3.5" /> Read Only
               </span>
             )}
-            <button
-              className="save-button"
-              onClick={handleSave}
-              disabled={isSaving}
-            >
-              <Save className="w-4 h-4" />
-              {isSaving ? "Saving..." : "Save"}
-            </button>
           </div>
         </div>
 
         {/* Visual formatting toolbar */}
-        <div className="editor-toolbar">
+        {isEditable && (
+          <div className="editor-toolbar">
           <button
             onClick={() => editor.chain().focus().toggleBold().run()}
             disabled={!editor.can().chain().focus().toggleBold().run()}
@@ -251,6 +269,7 @@ export default function MarkdownEditor({
             <Redo2 className="w-4 h-4" />
           </button>
         </div>
+        )}
       </div>
 
       <div className="editor-container">

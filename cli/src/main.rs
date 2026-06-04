@@ -48,6 +48,10 @@ fn main() -> Result<()> {
     let mut app = AppState::new(initial_dir);
 
     while !app.quit {
+        if app.needs_clear {
+            terminal.clear()?;
+            app.needs_clear = false;
+        }
         terminal.draw(|f| app.draw(f))?;
 
         if event::poll(Duration::from_millis(100))? {
