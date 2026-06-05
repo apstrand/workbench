@@ -2,9 +2,57 @@ use std::path::PathBuf;
 use std::fs;
 use serde::{Serialize, Deserialize};
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewMode {
+    List,
+    Tree,
+}
+
+impl Default for ViewMode {
+    fn default() -> Self {
+        ViewMode::List
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct PinnedItem {
+    pub path: String,
+    #[serde(rename = "isDir")]
+    pub is_dir: bool,
+}
+
+impl<'de> Deserialize<'de> for PinnedItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Helper {
+            String(String),
+            Struct {
+                path: String,
+                #[serde(rename = "isDir")]
+                is_dir: bool,
+            },
+        }
+
+        match Helper::deserialize(deserializer)? {
+            Helper::String(path) => {
+                let is_dir = !std::path::Path::new(&path).is_file();
+                Ok(PinnedItem { path, is_dir })
+            }
+            Helper::Struct { path, is_dir } => Ok(PinnedItem { path, is_dir }),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Config {
-    pub pinned_workspaces: Vec<String>,
+    pub pinned_workspaces: Vec<PinnedItem>,
+    #[serde(default)]
+    pub view_mode: ViewMode,
 }
 
 impl Config {
@@ -40,3 +88,41 @@ impl Config {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pinned_item_deserialization() {
+        let old_json = r#"{
+            "pinned_workspaces": [
+                "/Users/peter/dir1",
+                "/Users/peter/file1.md"
+            ]
+        }"#;
+
+        let config: Config = serde_json::from_str(old_json).unwrap();
+        assert_eq!(config.pinned_workspaces.len(), 2);
+        assert_eq!(config.pinned_workspaces[0].path, "/Users/peter/dir1");
+        assert!(config.pinned_workspaces[0].is_dir);
+
+        let new_json = r#"{
+            "pinned_workspaces": [
+                { "path": "/Users/peter/dir1", "isDir": true },
+                { "path": "/Users/peter/file1.md", "isDir": false }
+            ],
+            "view_mode": "tree"
+        }"#;
+
+        let config2: Config = serde_json::from_str(new_json).unwrap();
+        assert_eq!(config2.pinned_workspaces.len(), 2);
+        assert_eq!(config2.pinned_workspaces[0].path, "/Users/peter/dir1");
+        assert!(config2.pinned_workspaces[0].is_dir);
+        assert_eq!(config2.pinned_workspaces[1].path, "/Users/peter/file1.md");
+        assert!(!config2.pinned_workspaces[1].is_dir);
+        assert_eq!(config2.view_mode, ViewMode::Tree);
+    }
+}
+
+
