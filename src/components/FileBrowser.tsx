@@ -11,6 +11,8 @@ import {
   Image as ImageIcon,
   Video as VideoIcon,
   Terminal as TerminalIcon,
+  FolderTree,
+  List,
 } from "lucide-react";
 
 interface FileEntry {
@@ -19,12 +21,22 @@ interface FileEntry {
   is_dir: boolean;
 }
 
+interface PinnedItem {
+  path: string;
+  isDir: boolean;
+}
+
 interface FileBrowserProps {
   currentPath: string;
   setCurrentPath: (path: string) => void;
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
   width: number;
+  pinnedWorkspaces: PinnedItem[];
+  setPinnedWorkspaces: (items: PinnedItem[]) => void;
+  sortedPinned: PinnedItem[];
+  viewMode: "list" | "tree";
+  setViewMode: (mode: "list" | "tree") => void;
 }
 
 export default function FileBrowser({
@@ -33,6 +45,11 @@ export default function FileBrowser({
   selectedFile,
   onSelectFile,
   width,
+  pinnedWorkspaces,
+  setPinnedWorkspaces,
+  sortedPinned,
+  viewMode,
+  setViewMode,
 }: FileBrowserProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -86,50 +103,172 @@ export default function FileBrowser({
     window.addEventListener("mouseup", handleMouseUp);
   };
 
-  // Initialize pinned workspaces state from localStorage
-  const [pinnedWorkspaces, setPinnedWorkspaces] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem("tauri-markdown-workspaces");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
+  const [treeEntries, setTreeEntries] = useState<Record<string, FileEntry[]>>({});
+  const [focusedNodeIndex, setFocusedNodeIndex] = useState<number>(0);
+  const [treeRootPath, setTreeRootPath] = useState<string>(currentPath || "/");
 
-  // Persist workspaces in localStorage
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<FileEntry[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Global / key binding to focus search input
   useEffect(() => {
-    localStorage.setItem("tauri-markdown-workspaces", JSON.stringify(pinnedWorkspaces));
-  }, [pinnedWorkspaces]);
+    const handleGlobalSlash = (e: KeyboardEvent) => {
+      if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName || "")) {
+        const proseMirror = document.activeElement?.closest(".ProseMirror");
+        if (!proseMirror) {
+          e.preventDefault();
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleGlobalSlash);
+    return () => window.removeEventListener("keydown", handleGlobalSlash);
+  }, []);
+
+  // Directory recursive search invoke
+  useEffect(() => {
+    if (!searchQuery) {
+      setSearchResults([]);
+      return;
+    }
+    const delayDebounceFn = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const root = viewMode === "tree" ? treeRootPath : currentPath;
+        const res = await invoke<FileEntry[]>("search_directory", { path: root, query: searchQuery });
+        setSearchResults(res);
+      } catch (err) {
+        console.error("Search error:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 150);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery, viewMode, treeRootPath, currentPath]);
+
+  // Sync treeRootPath when currentPath is set and treeRootPath is still "/"
+  useEffect(() => {
+    if (currentPath && treeRootPath === "/") {
+      setTreeRootPath(currentPath);
+    }
+  }, [currentPath]);
+
+  // Load subdirectory entries for Tree View
+  const loadTreeDirectory = async (path: string) => {
+    if (treeEntries[path]) return; // already loaded
+    try {
+      const res = await invoke<FileEntry[]>("list_directory", { path });
+      setTreeEntries((prev) => ({
+        ...prev,
+        [path]: res,
+      }));
+    } catch (err) {
+      console.error(`Error loading tree directory ${path}:`, err);
+    }
+  };
+
+  // Sync root directory loading when treeRootPath changes
+  useEffect(() => {
+    if (treeRootPath) {
+      loadTreeDirectory(treeRootPath);
+    }
+  }, [treeRootPath]);
+
+  // Toggle expansion of a folder path
+  const toggleExpand = async (path: string) => {
+    const isExpanding = !expandedPaths[path];
+    setExpandedPaths((prev) => ({
+      ...prev,
+      [path]: isExpanding,
+    }));
+    if (isExpanding) {
+      await loadTreeDirectory(path);
+    }
+  };
+
+  interface FlatTreeNode {
+    path: string;
+    name: string;
+    isDir: boolean;
+    depth: number;
+    parentPath: string | null;
+  }
+
+  const getFlatTreeNodes = (): FlatTreeNode[] => {
+    const nodes: FlatTreeNode[] = [];
+    const traverse = (path: string, depth: number) => {
+      const entries = treeEntries[path] || [];
+      for (const entry of entries) {
+        nodes.push({
+          path: entry.path,
+          name: entry.name,
+          isDir: entry.is_dir,
+          depth,
+          parentPath: path,
+        });
+        if (entry.is_dir && expandedPaths[entry.path]) {
+          traverse(entry.path, depth + 1);
+        }
+      }
+    };
+    traverse(treeRootPath, 0);
+    return nodes;
+  };
+
+  const flatNodes = getFlatTreeNodes();
 
   // Sync folders focus bounds when entries change
   useEffect(() => {
-    if (entries.length === 0) {
-      setFocusedEntryIndex(-1);
-      if (activeSection === "folders" && pinnedWorkspaces.length > 0) {
-        setActiveSection("workspace");
-        setFocusedWorkspaceIndex(pinnedWorkspaces.length - 1);
+    if (viewMode === "tree") {
+      if (flatNodes.length === 0) {
+        setFocusedNodeIndex(-1);
+        if (activeSection === "folders" && sortedPinned.length > 0) {
+          setActiveSection("workspace");
+          setFocusedWorkspaceIndex(sortedPinned.length - 1);
+        }
+      } else {
+        if (focusedNodeIndex < 0 || focusedNodeIndex >= flatNodes.length) {
+          setFocusedNodeIndex(0);
+        }
       }
     } else {
-      if (focusedEntryIndex < 0 || focusedEntryIndex >= entries.length) {
-        setFocusedEntryIndex(0);
+      if (entries.length === 0) {
+        setFocusedEntryIndex(-1);
+        if (activeSection === "folders" && sortedPinned.length > 0) {
+          setActiveSection("workspace");
+          setFocusedWorkspaceIndex(sortedPinned.length - 1);
+        }
+      } else {
+        if (focusedEntryIndex < 0 || focusedEntryIndex >= entries.length) {
+          setFocusedEntryIndex(0);
+        }
       }
     }
-  }, [entries, activeSection, pinnedWorkspaces.length]);
+  }, [entries, activeSection, sortedPinned.length, flatNodes.length, viewMode]);
 
-  // Sync workspaces focus bounds when pinned folders change
+  // Sync workspaces focus bounds when pinned items change
   useEffect(() => {
-    if (pinnedWorkspaces.length === 0) {
+    if (sortedPinned.length === 0) {
       setFocusedWorkspaceIndex(-1);
       if (activeSection === "workspace") {
         setActiveSection("folders");
-        setFocusedEntryIndex(0);
+        if (viewMode === "tree") {
+          setFocusedNodeIndex(0);
+        } else {
+          setFocusedEntryIndex(0);
+        }
       }
     } else {
-      if (focusedWorkspaceIndex < 0 || focusedWorkspaceIndex >= pinnedWorkspaces.length) {
+      if (focusedWorkspaceIndex < 0 || focusedWorkspaceIndex >= sortedPinned.length) {
         setFocusedWorkspaceIndex(0);
       }
     }
-  }, [pinnedWorkspaces, activeSection]);
+  }, [sortedPinned, activeSection, viewMode]);
 
   // Sync folders focus index with selectedFile when entries or selectedFile changes
   useEffect(() => {
@@ -141,6 +280,17 @@ export default function FileBrowser({
       }
     }
   }, [selectedFile, entries]);
+
+  // Sync folders focus index with selectedFile in tree mode
+  useEffect(() => {
+    if (viewMode === "tree" && selectedFile && flatNodes.length > 0) {
+      const index = flatNodes.findIndex((node) => node.path === selectedFile);
+      if (index !== -1) {
+        setFocusedNodeIndex(index);
+        setActiveSection("folders");
+      }
+    }
+  }, [selectedFile, flatNodes.length, viewMode]);
 
   // Scroll focused entry or workspace folder into view
   useEffect(() => {
@@ -239,16 +389,16 @@ export default function FileBrowser({
     return parts.length > 0 ? parts[parts.length - 1] : path;
   };
 
-  // Pin a folder
-  const handlePin = (path: string) => {
-    if (!pinnedWorkspaces.includes(path)) {
-      setPinnedWorkspaces([...pinnedWorkspaces, path]);
+  // Pin a folder or file
+  const handlePin = (path: string, isDir: boolean) => {
+    if (!pinnedWorkspaces.some((p) => p.path === path)) {
+      setPinnedWorkspaces([...pinnedWorkspaces, { path, isDir }]);
     }
   };
 
-  // Unpin a folder
+  // Unpin a folder or file
   const handleUnpin = (path: string) => {
-    setPinnedWorkspaces(pinnedWorkspaces.filter((p) => p !== path));
+    setPinnedWorkspaces(pinnedWorkspaces.filter((p) => p.path !== path));
   };
 
   // Open terminal at path
@@ -263,22 +413,26 @@ export default function FileBrowser({
   const handleSidebarKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Backspace") {
       e.preventDefault();
-      if (canGoUp() && !loading) {
+      if (viewMode === "list" && canGoUp() && !loading) {
         handleGoUp();
       }
       return;
     }
 
     if (activeSection === "workspace") {
-      if (pinnedWorkspaces.length === 0) return;
+      if (sortedPinned.length === 0) return;
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        if (focusedWorkspaceIndex < pinnedWorkspaces.length - 1) {
+        if (focusedWorkspaceIndex < sortedPinned.length - 1) {
           setFocusedWorkspaceIndex((prev) => prev + 1);
-        } else if (entries.length > 0) {
+        } else if (viewMode === "tree" ? flatNodes.length > 0 : entries.length > 0) {
           setActiveSection("folders");
-          setFocusedEntryIndex(0);
+          if (viewMode === "tree") {
+            setFocusedNodeIndex(0);
+          } else {
+            setFocusedEntryIndex(0);
+          }
         }
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
@@ -286,35 +440,88 @@ export default function FileBrowser({
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         const index = focusedWorkspaceIndex >= 0 ? focusedWorkspaceIndex : 0;
-        if (index >= 0 && index < pinnedWorkspaces.length) {
-          setCurrentPath(pinnedWorkspaces[index]);
+        if (index >= 0 && index < sortedPinned.length) {
+          const item = sortedPinned[index];
+          if (item.isDir) {
+            setCurrentPath(item.path);
+            if (viewMode === "tree") {
+              setTreeRootPath(item.path);
+            }
+          } else {
+            onSelectFile(item.path);
+          }
         }
       }
     } else if (activeSection === "folders") {
-      if (entries.length === 0) return;
+      if (viewMode === "tree") {
+        if (flatNodes.length === 0) return;
 
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setFocusedEntryIndex((prev) => (prev < entries.length - 1 ? prev + 1 : prev));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (focusedEntryIndex > 0) {
-          setFocusedEntryIndex((prev) => prev - 1);
-        } else if (pinnedWorkspaces.length > 0) {
-          setActiveSection("workspace");
-          setFocusedWorkspaceIndex(pinnedWorkspaces.length - 1);
+        const node = flatNodes[focusedNodeIndex >= 0 ? focusedNodeIndex : 0];
+
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setFocusedNodeIndex((prev) => (prev < flatNodes.length - 1 ? prev + 1 : prev));
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (focusedNodeIndex > 0) {
+            setFocusedNodeIndex((prev) => prev - 1);
+          } else if (sortedPinned.length > 0) {
+            setActiveSection("workspace");
+            setFocusedWorkspaceIndex(sortedPinned.length - 1);
+          }
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          if (node && node.isDir && !expandedPaths[node.path]) {
+            toggleExpand(node.path);
+          }
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          if (node) {
+            if (node.isDir && expandedPaths[node.path]) {
+              toggleExpand(node.path);
+            } else if (node.parentPath) {
+              const pIdx = flatNodes.findIndex(n => n.path === node.parentPath);
+              if (pIdx !== -1) {
+                setFocusedNodeIndex(pIdx);
+              }
+            }
+          }
+        } else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (node) {
+            if (node.isDir) {
+              toggleExpand(node.path);
+            } else {
+              onSelectFile(node.path);
+            }
+          }
         }
-      } else if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
-        if (index >= 0 && index < entries.length) {
-          const entry = entries[index];
-          const isSelectable = !entry.is_dir;
-          
-          if (entry.is_dir) {
-            setCurrentPath(entry.path);
-          } else if (isSelectable) {
-            onSelectFile(entry.path);
+      } else {
+        if (entries.length === 0) return;
+
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setFocusedEntryIndex((prev) => (prev < entries.length - 1 ? prev + 1 : prev));
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (focusedEntryIndex > 0) {
+            setFocusedEntryIndex((prev) => prev - 1);
+          } else if (sortedPinned.length > 0) {
+            setActiveSection("workspace");
+            setFocusedWorkspaceIndex(sortedPinned.length - 1);
+          }
+        } else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
+          if (index >= 0 && index < entries.length) {
+            const entry = entries[index];
+            const isSelectable = !entry.is_dir;
+            
+            if (entry.is_dir) {
+              setCurrentPath(entry.path);
+            } else if (isSelectable) {
+              onSelectFile(entry.path);
+            }
           }
         }
       }
@@ -353,35 +560,46 @@ export default function FileBrowser({
       >
         <div className="sidebar-subheader">
           <span className="sidebar-section-title">
-            <Pin className="w-3.5 h-3.5 text-accent" style={{ transform: "rotate(45deg)" }} />
+            <Pin className="w-3.5 h-3.5 text-accent" />
             <span>Workspaces</span>
           </span>
         </div>
         <div className="sidebar-scroll-content">
-          {pinnedWorkspaces.length === 0 ? (
+          {sortedPinned.length === 0 ? (
             <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)", opacity: 0.7 }}>
-              No pinned workspace folders.
+              No pinned workspaces.
             </div>
           ) : (
             <div className="workspace-list">
-              {pinnedWorkspaces.map((path, index) => {
+              {sortedPinned.map((item, index) => {
                 const isFocused = activeSection === "workspace" && focusedWorkspaceIndex === index;
                 return (
                   <div
-                    key={path}
+                    key={item.path}
                     className={`workspace-item ${isFocused ? "keyboard-focused" : ""}`}
                     onClick={() => {
                       setActiveSection("workspace");
                       setFocusedWorkspaceIndex(index);
-                      setCurrentPath(path);
+                      if (item.isDir) {
+                        setCurrentPath(item.path);
+                        if (viewMode === "tree") {
+                          setTreeRootPath(item.path);
+                        }
+                      } else {
+                        onSelectFile(item.path);
+                      }
                     }}
-                    title={path}
+                    title={item.path}
                   >
                     <div className="workspace-item-info">
-                      <Folder style={{ width: "15px", height: "15px", fill: "var(--accent-soft)", color: "var(--accent)" }} />
+                      {item.isDir ? (
+                        <Folder style={{ width: "15px", height: "15px", fill: "var(--accent-soft)", color: "var(--accent)" }} />
+                      ) : (
+                        <FileText style={{ width: "15px", height: "15px", color: "var(--text-secondary)" }} />
+                      )}
                       <div className="workspace-item-text">
-                        <span className="workspace-item-name">{getFolderName(path)}</span>
-                        <span className="workspace-item-path">{path}</span>
+                        <span className="workspace-item-name">{getFolderName(item.path)}</span>
+                        <span className="workspace-item-path">{item.path}</span>
                       </div>
                     </div>
                     <div className="workspace-item-actions">
@@ -391,10 +609,10 @@ export default function FileBrowser({
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleUnpin(path);
+                          handleUnpin(item.path);
                           sidebarRef.current?.focus();
                         }}
-                        title="Unpin folder"
+                        title={item.isDir ? "Unpin folder" : "Unpin file"}
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -425,6 +643,23 @@ export default function FileBrowser({
           {currentPath && (
             <div style={{ display: "flex", gap: "6px" }}>
               <button
+                className={`file-action-btn ${viewMode === "tree" ? "active text-accent" : ""}`}
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  const nextMode = viewMode === "list" ? "tree" : "list";
+                  setViewMode(nextMode);
+                  if (nextMode === "tree" && currentPath) {
+                    setTreeRootPath(currentPath);
+                  }
+                  sidebarRef.current?.focus();
+                }}
+                title={viewMode === "list" ? "Switch to Tree View" : "Switch to List View"}
+                style={{ opacity: 0.8 }}
+              >
+                {viewMode === "list" ? <FolderTree className="w-3.5 h-3.5" /> : <List className="w-3.5 h-3.5" />}
+              </button>
+              <button
                 className="file-action-btn"
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
@@ -434,50 +669,101 @@ export default function FileBrowser({
               >
                 <TerminalIcon className="w-3.5 h-3.5" />
               </button>
-              <button
-                className="file-action-btn"
-                tabIndex={-1}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  if (pinnedWorkspaces.includes(currentPath)) {
-                    handleUnpin(currentPath);
-                  } else {
-                    handlePin(currentPath);
-                  }
-                  sidebarRef.current?.focus();
-                }}
-                title={pinnedWorkspaces.includes(currentPath) ? "Unpin current folder" : "Pin current folder"}
-                style={{ opacity: 0.8 }}
-              >
-                <Pin
-                  className={`w-3.5 h-3.5 ${pinnedWorkspaces.includes(currentPath) ? "pinned text-accent fill-accent" : ""}`}
-                  style={{
-                    transform: pinnedWorkspaces.includes(currentPath) ? "none" : "rotate(45deg)",
+              {viewMode === "list" && (
+                <button
+                  className="file-action-btn"
+                  tabIndex={-1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    const isCurrentPinned = pinnedWorkspaces.some((p) => p.path === currentPath);
+                    if (isCurrentPinned) {
+                      handleUnpin(currentPath);
+                    } else {
+                      handlePin(currentPath, true);
+                    }
+                    sidebarRef.current?.focus();
                   }}
-                />
-              </button>
+                  title={pinnedWorkspaces.some((p) => p.path === currentPath) ? "Unpin current folder" : "Pin current folder"}
+                  style={{ opacity: 0.8 }}
+                >
+                  <Pin
+                    className={`w-3.5 h-3.5 ${pinnedWorkspaces.some((p) => p.path === currentPath) ? "pinned text-accent fill-accent" : ""}`}
+                    style={{
+                      fill: pinnedWorkspaces.some((p) => p.path === currentPath) ? "var(--accent)" : "none",
+                    }}
+                  />
+                </button>
+              )}
             </div>
           )}
         </div>
-        <div className="sidebar-scroll-content">
-          <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
-            <button
-              className="nav-button"
-              tabIndex={-1}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                handleGoUp();
-                sidebarRef.current?.focus();
+        <div style={{ padding: "0 12px 8px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--bg-tertiary)", borderRadius: "4px", padding: "4px 8px", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: "12px", opacity: 0.6 }}>🔍</span>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search files... (Press /)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setSearchQuery("");
+                  searchInputRef.current?.blur();
+                  sidebarRef.current?.focus();
+                }
               }}
-              disabled={!canGoUp() || loading}
-              title="Go Up"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <div className="path-bar" title={currentPath}>
-              {currentPath || "Loading path..."}
-            </div>
+              style={{
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                color: "var(--text-primary)",
+                fontSize: "12px",
+                width: "100%",
+              }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  sidebarRef.current?.focus();
+                }}
+                style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", color: "var(--text-secondary)" }}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
+        </div>
+        <div className="sidebar-scroll-content">
+          {viewMode === "list" && (
+            <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+              <button
+                className="nav-button"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  handleGoUp();
+                  sidebarRef.current?.focus();
+                }}
+                disabled={!canGoUp() || loading}
+                title="Go Up"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="path-bar" title={currentPath}>
+                {currentPath || "Loading path..."}
+              </div>
+            </div>
+          )}
+
+          {viewMode === "tree" && (
+            <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center" }}>
+              <div className="path-bar" title={treeRootPath} style={{ flexGrow: 1, fontSize: "11px", opacity: 0.8 }}>
+                🌳 {treeRootPath}
+              </div>
+            </div>
+          )}
 
           {loading && (
             <div style={{ display: "flex", justifyContent: "center", padding: "20px" }}>
@@ -492,7 +778,117 @@ export default function FileBrowser({
             </div>
           )}
 
-          {!loading && !error && (
+          {!loading && !error && searchQuery && (
+            <div className="file-list">
+              {isSearching ? (
+                <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
+                  Searching...
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
+                  No results found
+                </div>
+              ) : (
+                searchResults.map((entry) => {
+                  const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
+                  const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
+                  const isSelectable = !entry.is_dir;
+                  const isSelected = selectedFile === entry.path;
+                  const isPinned = pinnedWorkspaces.some((p) => p.path === entry.path);
+                  
+                  const root = viewMode === "tree" ? treeRootPath : currentPath;
+                  const relPath = entry.path.startsWith(root)
+                    ? entry.path.substring(root.length).replace(/^[/\\]/, "")
+                    : entry.path;
+
+                  return (
+                    <div
+                      key={entry.path}
+                      className={`file-item ${isSelected ? "selected" : ""}`}
+                      onClick={() => {
+                        setActiveSection("folders");
+                        if (entry.is_dir) {
+                          setSearchQuery("");
+                          setCurrentPath(entry.path);
+                          if (viewMode === "tree") {
+                            setTreeRootPath(entry.path);
+                          }
+                        } else if (isSelectable) {
+                          onSelectFile(entry.path);
+                        }
+                      }}
+                      style={{
+                        opacity: !entry.is_dir && !isSelectable ? 0.45 : 1,
+                        cursor: !entry.is_dir && !isSelectable ? "default" : "pointer",
+                      }}
+                    >
+                      <span className="file-item-icon">
+                        {entry.is_dir ? (
+                          <Folder style={{ width: "16px", height: "16px", fill: "var(--text-secondary)", opacity: 0.8 }} />
+                        ) : isImage ? (
+                          <ImageIcon style={{ width: "16px", height: "16px" }} />
+                        ) : isVideo ? (
+                          <VideoIcon style={{ width: "16px", height: "16px" }} />
+                        ) : (
+                          <FileText style={{ width: "16px", height: "16px" }} />
+                        )}
+                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden" }}>
+                        <span
+                          style={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {entry.name}
+                        </span>
+                        <span
+                          style={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            fontSize: "10px",
+                            opacity: 0.6,
+                          }}
+                        >
+                          {relPath || entry.path}
+                        </span>
+                      </div>
+
+                      <div className="file-item-actions">
+                        <button
+                          className={`file-action-btn ${isPinned ? "pinned" : ""}`}
+                          tabIndex={-1}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isPinned) {
+                              handleUnpin(entry.path);
+                            } else {
+                              handlePin(entry.path, entry.is_dir);
+                            }
+                            sidebarRef.current?.focus();
+                          }}
+                          title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                        >
+                          <Pin
+                            className="w-3.5 h-3.5"
+                            style={{
+                              fill: isPinned ? "var(--accent)" : "none",
+                            }}
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {!loading && !error && !searchQuery && viewMode === "list" && (
             <div className="file-list">
               {entries.length === 0 ? (
                 <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -505,7 +901,7 @@ export default function FileBrowser({
                   const isSelectable = !entry.is_dir;
                   
                   const isSelected = selectedFile === entry.path;
-                  const isPinned = pinnedWorkspaces.includes(entry.path);
+                  const isPinned = pinnedWorkspaces.some((p) => p.path === entry.path);
                   const isFocused = activeSection === "folders" && focusedEntryIndex === index;
                   
                   return (
@@ -548,33 +944,121 @@ export default function FileBrowser({
                         {entry.name}
                       </span>
 
-                      {entry.is_dir && (
-                        <div className="file-item-actions">
-                          <button
-                            className={`file-action-btn ${isPinned ? "pinned" : ""}`}
-                            tabIndex={-1}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isPinned) {
-                                handleUnpin(entry.path);
-                              } else {
-                                handlePin(entry.path);
-                              }
-                              sidebarRef.current?.focus();
+                      <div className="file-item-actions">
+                        <button
+                          className={`file-action-btn ${isPinned ? "pinned" : ""}`}
+                          tabIndex={-1}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isPinned) {
+                              handleUnpin(entry.path);
+                            } else {
+                              handlePin(entry.path, entry.is_dir);
+                            }
+                            sidebarRef.current?.focus();
+                          }}
+                          title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                        >
+                          <Pin
+                            className="w-3.5 h-3.5"
+                            style={{
+                              fill: isPinned ? "var(--accent)" : "none",
                             }}
-                            title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
-                          >
-                            <Pin
-                              className="w-3.5 h-3.5"
-                              style={{
-                                transform: isPinned ? "none" : "rotate(45deg)",
-                                fill: isPinned ? "var(--accent)" : "none",
-                              }}
-                            />
-                          </button>
-                        </div>
-                      )}
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {!loading && !error && !searchQuery && viewMode === "tree" && (
+            <div className="file-list">
+              {flatNodes.length === 0 ? (
+                <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
+                  Empty Workspace
+                </div>
+              ) : (
+                flatNodes.map((node, index) => {
+                  const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(node.name);
+                  const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(node.name);
+                  const isSelected = selectedFile === node.path;
+                  const isPinned = pinnedWorkspaces.some((p) => p.path === node.path);
+                  const isFocused = activeSection === "folders" && focusedNodeIndex === index;
+                  const isExpanded = expandedPaths[node.path];
+
+                  return (
+                    <div
+                      key={node.path}
+                      className={`file-item ${isSelected ? "selected" : ""} ${isFocused ? "keyboard-focused" : ""}`}
+                      onClick={() => {
+                        setActiveSection("folders");
+                        setFocusedNodeIndex(index);
+                        if (node.isDir) {
+                          toggleExpand(node.path);
+                        } else {
+                          onSelectFile(node.path);
+                        }
+                      }}
+                      style={{
+                        paddingLeft: `${node.depth * 12 + 8}px`,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span className="file-item-icon" style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                        {node.isDir && (
+                          <span style={{ fontSize: "10px", width: "10px", display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}>
+                            ▶
+                          </span>
+                        )}
+                        {node.isDir ? (
+                          <Folder style={{ width: "16px", height: "16px", fill: "var(--text-secondary)", opacity: 0.8 }} />
+                        ) : isImage ? (
+                          <ImageIcon style={{ width: "16px", height: "16px" }} />
+                        ) : isVideo ? (
+                          <VideoIcon style={{ width: "16px", height: "16px" }} />
+                        ) : (
+                          <FileText style={{ width: "16px", height: "16px" }} />
+                        )}
+                      </span>
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          flexGrow: 1,
+                        }}
+                      >
+                        {node.name}
+                      </span>
+
+                      <div className="file-item-actions">
+                        <button
+                          className={`file-action-btn ${isPinned ? "pinned" : ""}`}
+                          tabIndex={-1}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isPinned) {
+                              handleUnpin(node.path);
+                            } else {
+                              handlePin(node.path, node.isDir);
+                            }
+                            sidebarRef.current?.focus();
+                          }}
+                          title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                        >
+                          <Pin
+                            className="w-3.5 h-3.5"
+                            style={{
+                              fill: isPinned ? "var(--accent)" : "none",
+                            }}
+                          />
+                        </button>
+                      </div>
                     </div>
                   );
                 })

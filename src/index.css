@@ -497,13 +497,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  width: 24px;
+  height: 24px;
   border-radius: 4px;
   border: none;
   background: transparent;
   color: var(--text-primary);
   cursor: pointer;
   transition: all 0.15s ease;
+  padding: 0;
+}
+
+.toolbar-btn svg {
+  width: 14px !important;
+  height: 14px !important;
 }
 
 .toolbar-btn:hover {
@@ -650,6 +657,11 @@ body {
   accent-color: var(--accent);
 }
 
+.ProseMirror li[data-checked="true"] > div {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
 .ProseMirror hr {
   border: 0;
   border-top: 1px solid var(--border);
@@ -657,18 +669,66 @@ body {
 }
 
 /* Tabs Bar Styles */
-.tabs-bar {
+.tabs-container {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
+  height: 35px;
+  width: 100%;
+}
+
+.tabs-bar {
+  display: flex;
   overflow-x: auto;
   scrollbar-width: none; /* Hide scrollbar for tabs */
-  height: 35px;
+  height: 100%;
   align-items: flex-end;
+  flex-grow: 1;
 }
 
 .tabs-bar::-webkit-scrollbar {
   display: none; /* Hide scrollbar for WebKit */
+}
+
+.tab-item.dragging {
+  opacity: 0.4;
+  border-top-color: var(--accent);
+}
+
+.tab-dirty-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+  margin-left: 2px;
+}
+
+.save-all-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  margin-right: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  height: 22px;
+  align-self: center;
+}
+
+.save-all-btn:hover {
+  background-color: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
 
 .tab-item {
