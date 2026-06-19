@@ -1,12 +1,17 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import FileBrowser from "./components/FileBrowser";
 import MarkdownEditor from "./components/MarkdownEditor";
 import MediaViewer from "./components/MediaViewer";
-import { FileCode, Loader2, X, AlertCircle } from "lucide-react";
+import TerminalPane from "./components/TerminalPane";
+import { FileCode, Loader2, X, AlertCircle, RefreshCw } from "lucide-react";
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState("");
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [isInstalling, setIsInstalling] = useState(false);
   const [openTabs, setOpenTabs] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem("tauri-markdown-open-tabs");
@@ -27,6 +32,56 @@ export default function App() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
 
+  const [isTerminalOpen, setIsTerminalOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("tauri-markdown-terminal-open") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [terminalHeight, setTerminalHeight] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("tauri-markdown-terminal-height");
+      return saved ? parseInt(saved, 10) : 280;
+    } catch {
+      return 280;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("tauri-markdown-terminal-open", String(isTerminalOpen));
+  }, [isTerminalOpen]);
+
+  useEffect(() => {
+    localStorage.setItem("tauri-markdown-terminal-height", String(terminalHeight));
+  }, [terminalHeight]);
+
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+    onDiscard?: () => void | Promise<void>;
+    onCancel?: () => void;
+  } | null>(null);
+
+  const filesDataRef = useRef(filesData);
+  useEffect(() => {
+    filesDataRef.current = filesData;
+  }, [filesData]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const version = await invoke<string | null>("check_for_updates");
+        if (version) setUpdateVersion(version);
+      } catch {
+        // updater not available in dev or network error — silent
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("tauri-markdown-open-tabs", JSON.stringify(openTabs));
   }, [openTabs]);
@@ -45,6 +100,54 @@ export default function App() {
     if (savedSelected) {
       handleSelectFile(savedSelected);
     }
+  }, []);
+
+  // Intercept application window close to check for unsaved changes
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    const unlistenPromise = appWindow.onCloseRequested(async (event) => {
+      const currentFilesData = filesDataRef.current;
+      const dirtyFiles = Object.entries(currentFilesData).filter(
+        ([_, data]) => data.savedContent !== data.currentContent
+      );
+      
+      if (dirtyFiles.length > 0) {
+        event.preventDefault();
+        
+        setConfirmDialog({
+          isOpen: true,
+          title: "Unsaved Changes",
+          message: dirtyFiles.length === 1 
+            ? `"${getFileName(dirtyFiles[0][0])}" has unsaved changes. Do you want to save them before quitting?`
+            : `You have unsaved changes in ${dirtyFiles.length} files. Do you want to save them before quitting?`,
+          onConfirm: async () => {
+            try {
+              await Promise.all(
+                dirtyFiles.map(async ([path, data]) => {
+                  await invoke("write_file_content", {
+                    path,
+                    content: data.currentContent,
+                  });
+                })
+              );
+              await getCurrentWindow().destroy();
+            } catch (err) {
+              alert(`Error saving files: ${err}`);
+            }
+          },
+          onDiscard: async () => {
+            await getCurrentWindow().destroy();
+          },
+          onCancel: () => {
+            // Stay in app
+          }
+        });
+      }
+    });
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
   }, []);
 
   interface PinnedItem {
@@ -199,12 +302,26 @@ export default function App() {
     };
 
     if (isDirty) {
-      setTimeout(() => {
-        const confirmClose = window.confirm(`${getFileName(pathToRemove)} has unsaved changes. Are you sure you want to close it?`);
-        if (confirmClose) {
+      setConfirmDialog({
+        isOpen: true,
+        title: "Unsaved Changes",
+        message: `"${getFileName(pathToRemove)}" has unsaved changes. Do you want to save them before closing?`,
+        onConfirm: async () => {
+          try {
+            const content = filesData[pathToRemove].currentContent;
+            await handleSaveFile(pathToRemove, content);
+            proceedWithClose();
+          } catch (err) {
+            console.error("Failed to save before closing:", err);
+          }
+        },
+        onDiscard: () => {
           proceedWithClose();
+        },
+        onCancel: () => {
+          // Do nothing
         }
-      }, 0);
+      });
     } else {
       proceedWithClose();
     }
@@ -354,6 +471,39 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleNumberShortcuts);
   }, [openTabs, sortedPinned]);
 
+  // Keyboard shortcut Ctrl+` to toggle the terminal panel
+  useEffect(() => {
+    const handleToggleTerminal = (e: KeyboardEvent) => {
+      if (e.ctrlKey && (e.key === "`" || e.code === "Backquote")) {
+        e.preventDefault();
+        setIsTerminalOpen(prev => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleToggleTerminal);
+    return () => window.removeEventListener("keydown", handleToggleTerminal);
+  }, []);
+
+  // Handle drag resizing for the terminal panel
+  const startTerminalResize = (mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    const startHeight = terminalHeight;
+    const startY = mouseDownEvent.clientY;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      const newHeight = Math.max(120, Math.min(window.innerHeight - 200, startHeight - deltaY));
+      setTerminalHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
   const handleDragStart = (e: React.DragEvent, path: string) => {
     setDraggedTab(path);
     e.dataTransfer.effectAllowed = "move";
@@ -399,6 +549,31 @@ export default function App() {
 
       {/* Editor/Viewer Panel with Tabs Bar */}
       <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+        {/* Update notification banner */}
+        {updateVersion && !updateDismissed && (
+          <div className="update-banner">
+            <RefreshCw className="w-4 h-4" style={{ flexShrink: 0 }} />
+            <span>Update v{updateVersion} available</span>
+            <button
+              className="update-install-btn"
+              disabled={isInstalling}
+              onClick={async () => {
+                setIsInstalling(true);
+                try {
+                  await invoke("download_and_install_update");
+                } catch (err) {
+                  alert(`Update failed: ${err}`);
+                  setIsInstalling(false);
+                }
+              }}
+            >
+              {isInstalling ? "Installing…" : "Install & Restart"}
+            </button>
+            <button className="update-dismiss-btn" onClick={() => setUpdateDismissed(true)}>
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
         {/* Tabs Bar Container */}
         {openTabs.length > 0 && (
           <div className="tabs-container">
@@ -446,7 +621,7 @@ export default function App() {
         )}
 
         {/* Content Area */}
-        <div style={{ flexGrow: 1, display: "flex", height: "100%", overflow: "hidden" }}>
+        <div style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minHeight: 0, display: "flex", overflow: "hidden" }}>
           {isLoadingFile ? (
             <div className="no-file-selected">
               <Loader2 className="w-10 h-10 animate-spin text-accent" style={{ marginBottom: "16px" }} />
@@ -484,7 +659,70 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {/* Resizer and Terminal Pane (Always mounted to preserve session states) */}
+        <div 
+          className="terminal-resizer" 
+          onMouseDown={startTerminalResize} 
+          style={{ display: isTerminalOpen ? "block" : "none" }}
+        />
+        <div 
+          style={{ 
+            height: isTerminalOpen ? `${terminalHeight}px` : "0px", 
+            display: isTerminalOpen ? "flex" : "none", 
+            flexDirection: "column", 
+            flexShrink: 0 
+          }}
+        >
+          <TerminalPane
+            currentPath={currentPath}
+            onClose={() => setIsTerminalOpen(false)}
+          />
+        </div>
       </div>
+
+      {/* Custom Confirm Modal Dialog */}
+      {confirmDialog && confirmDialog.isOpen && (
+        <div className="confirm-modal-overlay">
+          <div className="confirm-modal">
+            <h3>{confirmDialog.title}</h3>
+            <p>{confirmDialog.message}</p>
+            <div className="confirm-modal-actions">
+              <button 
+                className="confirm-btn-primary" 
+                onClick={async () => {
+                  await confirmDialog.onConfirm();
+                  setConfirmDialog(null);
+                }}
+              >
+                Save
+              </button>
+              {confirmDialog.onDiscard && (
+                <button 
+                  className="confirm-btn-secondary" 
+                  onClick={async () => {
+                    await confirmDialog.onDiscard?.();
+                    setConfirmDialog(null);
+                  }}
+                >
+                  Don't Save
+                </button>
+              )}
+              {confirmDialog.onCancel && (
+                <button 
+                  className="confirm-btn-cancel" 
+                  onClick={() => {
+                    confirmDialog.onCancel?.();
+                    setConfirmDialog(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -547,6 +547,15 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
   display: flex;
   flex-direction: column;
+  flex-grow: 1;
+  height: 100%;
+}
+
+.editor-wrapper > div {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 /* ProseMirror Markdown styling */
@@ -554,7 +563,7 @@ body {
   outline: none;
   font-size: 14.5px;
   line-height: 1.55;
-  min-height: 400px;
+  flex-grow: 1;
   padding: 20px 28px;
   box-sizing: border-box;
 }
@@ -630,7 +639,11 @@ body {
 }
 
 .ProseMirror li {
-  margin-bottom: 0.4em;
+  margin-bottom: 0.25em;
+}
+
+.ProseMirror li p {
+  margin: 0;
 }
 
 .ProseMirror ul[data-type="taskList"] {
@@ -642,7 +655,7 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 0.3em;
+  margin-bottom: 0.25em;
 }
 
 .ProseMirror ul[data-type="taskList"] li > label {
@@ -786,3 +799,455 @@ body {
   background-color: var(--border);
   color: var(--text-primary);
 }
+
+/* Confirm Modal Overlay */
+.confirm-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: modalFadeIn 0.2s ease-out;
+}
+
+/* Confirm Modal Container */
+.confirm-modal {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 400px;
+  padding: 20px 24px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  animation: modalScaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.confirm-modal h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.confirm-modal p {
+  margin-top: 0;
+  margin-bottom: 24px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm-modal-actions button {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.confirm-btn-primary {
+  background-color: var(--accent);
+  color: white;
+}
+
+.confirm-btn-primary:hover {
+  background-color: var(--accent-hover);
+}
+
+.confirm-btn-secondary {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border) !important;
+  color: var(--text-primary);
+}
+
+.confirm-btn-secondary:hover {
+  background-color: var(--border);
+}
+
+.confirm-btn-cancel {
+  background-color: transparent;
+  border-color: var(--border) !important;
+  color: var(--text-secondary);
+}
+
+.confirm-btn-cancel:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalScaleUp {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Find & Replace Bar */
+.find-replace-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  animation: slideDown 0.15s ease-out;
+}
+
+.find-replace-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.find-replace-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+}
+
+.find-replace-input {
+  width: 100%;
+  padding: 6px 42px 6px 12px;
+  font-size: 13px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.find-replace-input:focus {
+  border-color: var(--accent);
+}
+
+.find-replace-match-count {
+  position: absolute;
+  right: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.find-replace-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-replace-btn:hover {
+  background-color: var(--border);
+}
+
+.find-replace-btn.accent-btn {
+  background-color: var(--accent);
+  color: white;
+  border-color: transparent;
+}
+
+.find-replace-btn.accent-btn:hover {
+  background-color: var(--accent-hover);
+}
+
+.find-replace-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.find-replace-toggle input {
+  cursor: pointer;
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Custom search-result highlights for the editor content */
+.search-result {
+  background-color: rgba(234, 179, 8, 0.4); /* Highlight yellow */
+  border-bottom: 2px solid rgb(234, 179, 8);
+}
+
+.search-result.active-match {
+  background-color: rgba(249, 115, 22, 0.6) !important; /* Highlight orange */
+  border-bottom: 2px solid rgb(249, 115, 22) !important;
+}
+
+/* Sizing and Color Utility Classes (Tailwind fallbacks for WebKit/Safari SVGs) */
+.w-3 { width: 12px; }
+.h-3 { height: 12px; }
+.w-3\.5 { width: 14px; }
+.h-3\.5 { height: 14px; }
+.w-4 { width: 16px; }
+.h-4 { height: 16px; }
+.w-5 { width: 20px; }
+.h-5 { height: 20px; }
+.w-6 { width: 24px; }
+.h-6 { height: 24px; }
+.w-10 { width: 40px; }
+.h-10 { height: 40px; }
+.w-12 { width: 48px; }
+.h-12 { height: 48px; }
+
+.text-accent { color: var(--accent); }
+.text-secondary { color: var(--text-secondary); }
+.fill-accent { fill: var(--accent); }
+
+/* Terminal Resizer */
+.terminal-resizer {
+  height: 4px;
+  min-height: 4px;
+  cursor: row-resize;
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.terminal-resizer:hover,
+.terminal-resizer:active {
+  background-color: var(--accent);
+}
+
+/* Terminal Pane Layout */
+.terminal-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* Header & Tabs */
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 35px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 0 10px;
+  flex-shrink: 0;
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+/* Hide scrollbar for terminal tabs */
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+.terminal-tabs {
+  scrollbar-width: none;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.terminal-tab:hover {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.terminal-tab.active {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border);
+  border-top: 2px solid var(--accent);
+  height: 30px;
+}
+
+.terminal-tab-icon {
+  opacity: 0.7;
+}
+
+.terminal-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.5;
+  transition: all 0.2s ease;
+}
+
+.terminal-tab-close:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.terminal-action-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Terminal Body */
+.terminal-body {
+  flex-grow: 1;
+  width: 100%;
+  height: calc(100% - 35px);
+  position: relative;
+  background-color: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.terminal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: 14px;
+  gap: 12px;
+}
+
+/* xterm overlay styling */
+.xterm {
+  height: 100%;
+  width: 100%;
+}
+
+.xterm-viewport {
+  background-color: transparent !important;
+}
+
+/* Update notification banner */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.update-install-btn {
+  margin-left: 4px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  background-color: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.update-install-btn:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.update-install-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.update-dismiss-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.update-dismiss-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+
+

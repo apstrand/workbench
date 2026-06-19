@@ -1,6 +1,6 @@
-# Tauri Markdown Editor & File Browser
+# Markdown Editor & File Browser
 
-A premium desktop Markdown editor built with **Tauri v2**, **React**, **TypeScript**, and **Tiptap**. It enables browsing local files via a sidebar list and editing `.md` documents natively using a visual WYSIWYG editor that reads and saves pure Markdown.
+A Markdown editor built with **Tauri v2**, **React**, **TypeScript**, and **Tiptap**. It enables browsing local files via a sidebar list and editing `.md` documents natively using a visual WYSIWYG editor that reads and saves pure Markdown.
 
 ## Key Features
 

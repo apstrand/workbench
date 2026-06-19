@@ -6,7 +6,7 @@ import {
   ChevronLeft,
   Loader2,
   AlertCircle,
-  Pin,
+  Star,
   X,
   Image as ImageIcon,
   Video as VideoIcon,
@@ -111,22 +111,44 @@ export default function FileBrowser({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FileEntry[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchScope, setSearchScope] = useState<"folder" | "workspaces">("folder");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Global / key binding to focus search input
+  const getFileName = (pathStr: string) => {
+    const isWindows = pathStr.includes("\\");
+    const separator = isWindows ? "\\" : "/";
+    return pathStr.substring(pathStr.lastIndexOf(separator) + 1) || pathStr;
+  };
+
+  // Global key bindings to focus search input
+  // '/' toggles folder search, 'Cmd+Shift+F' or 'Ctrl+Shift+F' toggles workspace search
   useEffect(() => {
-    const handleGlobalSlash = (e: KeyboardEvent) => {
-      if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName || "")) {
-        const proseMirror = document.activeElement?.closest(".ProseMirror");
-        if (!proseMirror) {
-          e.preventDefault();
-          searchInputRef.current?.focus();
-          searchInputRef.current?.select();
-        }
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const isCmd = e.metaKey || e.ctrlKey;
+      const isShift = e.shiftKey;
+      
+      // Ignore if typing inside input or editor
+      if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName || "")) {
+        return;
+      }
+      if (document.activeElement?.closest(".ProseMirror")) {
+        return;
+      }
+
+      if (isCmd && isShift && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchScope("workspaces");
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      } else if (e.key === "/") {
+        e.preventDefault();
+        setSearchScope("folder");
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
       }
     };
-    window.addEventListener("keydown", handleGlobalSlash);
-    return () => window.removeEventListener("keydown", handleGlobalSlash);
+    window.addEventListener("keydown", handleGlobalShortcuts);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts);
   }, []);
 
   // Directory recursive search invoke
@@ -138,9 +160,49 @@ export default function FileBrowser({
     const delayDebounceFn = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const root = viewMode === "tree" ? treeRootPath : currentPath;
-        const res = await invoke<FileEntry[]>("search_directory", { path: root, query: searchQuery });
-        setSearchResults(res);
+        if (searchScope === "workspaces") {
+          // Search in all pinned workspaces
+          const allResults: FileEntry[] = [];
+          const seenPaths = new Set<string>();
+
+          for (const item of pinnedWorkspaces) {
+            if (item.isDir) {
+              try {
+                const res = await invoke<FileEntry[]>("search_directory", { 
+                  path: item.path, 
+                  query: searchQuery 
+                });
+                for (const entry of res) {
+                  if (!seenPaths.has(entry.path)) {
+                    seenPaths.add(entry.path);
+                    allResults.push(entry);
+                  }
+                }
+              } catch (err) {
+                console.error(`Search error in workspace ${item.path}:`, err);
+              }
+            } else {
+              // Pinned file: match name case-insensitively
+              const fileName = getFileName(item.path);
+              if (fileName.toLowerCase().includes(searchQuery.toLowerCase())) {
+                if (!seenPaths.has(item.path)) {
+                  seenPaths.add(item.path);
+                  allResults.push({
+                    path: item.path,
+                    name: fileName,
+                    is_dir: false
+                  });
+                }
+              }
+            }
+          }
+          setSearchResults(allResults);
+        } else {
+          // Search in current folder
+          const root = viewMode === "tree" ? treeRootPath : currentPath;
+          const res = await invoke<FileEntry[]>("search_directory", { path: root, query: searchQuery });
+          setSearchResults(res);
+        }
       } catch (err) {
         console.error("Search error:", err);
       } finally {
@@ -149,7 +211,7 @@ export default function FileBrowser({
     }, 150);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, viewMode, treeRootPath, currentPath]);
+  }, [searchQuery, searchScope, viewMode, treeRootPath, currentPath, pinnedWorkspaces]);
 
   // Sync treeRootPath when currentPath is set and treeRootPath is still "/"
   useEffect(() => {
@@ -560,7 +622,7 @@ export default function FileBrowser({
       >
         <div className="sidebar-subheader">
           <span className="sidebar-section-title">
-            <Pin className="w-3.5 h-3.5 text-accent" />
+            <Star className="w-3.5 h-3.5 text-accent" style={{ fill: "var(--accent)" }} />
             <span>Workspaces</span>
           </span>
         </div>
@@ -686,7 +748,7 @@ export default function FileBrowser({
                   title={pinnedWorkspaces.some((p) => p.path === currentPath) ? "Unpin current folder" : "Pin current folder"}
                   style={{ opacity: 0.8 }}
                 >
-                  <Pin
+                  <Star
                     className={`w-3.5 h-3.5 ${pinnedWorkspaces.some((p) => p.path === currentPath) ? "pinned text-accent fill-accent" : ""}`}
                     style={{
                       fill: pinnedWorkspaces.some((p) => p.path === currentPath) ? "var(--accent)" : "none",
@@ -703,7 +765,7 @@ export default function FileBrowser({
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="Search files... (Press /)"
+              placeholder={searchScope === "workspaces" ? "Search workspaces... (Cmd+Shift+F)" : "Search folder... (Press /)"}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -722,6 +784,43 @@ export default function FileBrowser({
                 width: "100%",
               }}
             />
+            {searchScope === "workspaces" ? (
+              <span 
+                onClick={() => setSearchScope("folder")}
+                style={{
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  backgroundColor: "var(--accent-soft)",
+                  color: "var(--accent)",
+                  padding: "2px 5px",
+                  borderRadius: "3px",
+                  flexShrink: 0,
+                  cursor: "pointer",
+                  userSelect: "none"
+                }}
+                title="Searching all workspaces. Click to search current folder."
+              >
+                Workspaces
+              </span>
+            ) : (
+              <span 
+                onClick={() => setSearchScope("workspaces")}
+                style={{
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  backgroundColor: "var(--bg-secondary)",
+                  color: "var(--text-secondary)",
+                  padding: "2px 5px",
+                  borderRadius: "3px",
+                  flexShrink: 0,
+                  cursor: "pointer",
+                  userSelect: "none"
+                }}
+                title="Searching current folder. Click to search all pinned workspaces."
+              >
+                Folder
+              </span>
+            )}
             {searchQuery && (
               <button
                 onClick={() => {
@@ -796,10 +895,24 @@ export default function FileBrowser({
                   const isSelected = selectedFile === entry.path;
                   const isPinned = pinnedWorkspaces.some((p) => p.path === entry.path);
                   
-                  const root = viewMode === "tree" ? treeRootPath : currentPath;
-                  const relPath = entry.path.startsWith(root)
-                    ? entry.path.substring(root.length).replace(/^[/\\]/, "")
-                    : entry.path;
+                  let relPath = entry.path;
+                  if (searchScope === "workspaces") {
+                    const matchingWorkspace = pinnedWorkspaces.find(
+                      (p) => p.isDir && entry.path.startsWith(p.path)
+                    );
+                    if (matchingWorkspace) {
+                      const wsName = getFileName(matchingWorkspace.path);
+                      const subPath = entry.path.substring(matchingWorkspace.path.length).replace(/^[/\\]/, "");
+                      relPath = subPath ? `${wsName} › ${subPath}` : wsName;
+                    } else {
+                      relPath = getFileName(entry.path);
+                    }
+                  } else {
+                    const root = viewMode === "tree" ? treeRootPath : currentPath;
+                    relPath = entry.path.startsWith(root)
+                      ? entry.path.substring(root.length).replace(/^[/\\]/, "")
+                      : entry.path;
+                  }
 
                   return (
                     <div
@@ -873,7 +986,7 @@ export default function FileBrowser({
                           }}
                           title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                         >
-                          <Pin
+                          <Star
                             className="w-3.5 h-3.5"
                             style={{
                               fill: isPinned ? "var(--accent)" : "none",
@@ -960,7 +1073,7 @@ export default function FileBrowser({
                           }}
                           title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                         >
-                          <Pin
+                          <Star
                             className="w-3.5 h-3.5"
                             style={{
                               fill: isPinned ? "var(--accent)" : "none",
@@ -1051,7 +1164,7 @@ export default function FileBrowser({
                           }}
                           title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                         >
-                          <Pin
+                          <Star
                             className="w-3.5 h-3.5"
                             style={{
                               fill: isPinned ? "var(--accent)" : "none",
