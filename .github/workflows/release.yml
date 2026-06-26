@@ -7,11 +7,10 @@ on:
 
 permissions:
   contents: write
+  packages: write
   
 jobs:
   release:
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
