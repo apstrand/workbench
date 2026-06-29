@@ -70,6 +70,16 @@ export default function App() {
     filesDataRef.current = filesData;
   }, [filesData]);
 
+  const selectedFileRef = useRef(selectedFile);
+  useEffect(() => {
+    selectedFileRef.current = selectedFile;
+  }, [selectedFile]);
+
+  const handleCloseTabRef = useRef<(path: string) => void>(() => {});
+  useEffect(() => {
+    handleCloseTabRef.current = handleCloseTab;
+  });
+
   useEffect(() => {
     const timer = setTimeout(async () => {
       try {
@@ -106,18 +116,20 @@ export default function App() {
   useEffect(() => {
     const appWindow = getCurrentWindow();
     const unlistenPromise = appWindow.onCloseRequested(async (event) => {
+      // Always prevent default and manage the window lifecycle explicitly,
+      // because Tauri v2 does not reliably close the window otherwise.
+      event.preventDefault();
+
       const currentFilesData = filesDataRef.current;
       const dirtyFiles = Object.entries(currentFilesData).filter(
         ([_, data]) => data.savedContent !== data.currentContent
       );
-      
+
       if (dirtyFiles.length > 0) {
-        event.preventDefault();
-        
         setConfirmDialog({
           isOpen: true,
           title: "Unsaved Changes",
-          message: dirtyFiles.length === 1 
+          message: dirtyFiles.length === 1
             ? `"${getFileName(dirtyFiles[0][0])}" has unsaved changes. Do you want to save them before quitting?`
             : `You have unsaved changes in ${dirtyFiles.length} files. Do you want to save them before quitting?`,
           onConfirm: async () => {
@@ -142,6 +154,8 @@ export default function App() {
             // Stay in app
           }
         });
+      } else {
+        await appWindow.destroy();
       }
     });
 
@@ -392,6 +406,19 @@ export default function App() {
   useEffect(() => {
     handleSaveAllRef.current = handleSaveAll;
   });
+
+  // Keyboard shortcut Cmd+W / Ctrl+W to close the active tab
+  useEffect(() => {
+    const handleCmdW = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === "w") {
+        e.preventDefault();
+        const file = selectedFileRef.current;
+        if (file) handleCloseTabRef.current(file);
+      }
+    };
+    window.addEventListener("keydown", handleCmdW);
+    return () => window.removeEventListener("keydown", handleCmdW);
+  }, []);
 
   // Keyboard shortcut Cmd+Alt+S / Ctrl+Alt+S to save all dirty files
   useEffect(() => {
